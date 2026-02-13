@@ -102,4 +102,4 @@ async def merge_videos(
     except Exception as e:
         # Error handling
         shutil.rmtree(temp_dir, ignore_errors=True)
-        return {"error": str(e), "details": "MoviePy v2 update error"}
+        return {"error": str(e), "details": "MoviePy v2.0 update error"}
