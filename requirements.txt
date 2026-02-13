@@ -1,0 +1,7 @@
+fastapi
+uvicorn
+python-multipart
+moviepy
+imageio==2.31.1
+decorator==4.4.2
+requests
