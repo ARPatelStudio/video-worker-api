@@ -1,13 +1,14 @@
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
-from moviepy.editor import VideoFileClip, concatenate_videoclips
+# CHANGE 1: 'moviepy.editor' ab exist nahi karta, direct import karein
+from moviepy import VideoFileClip, concatenate_videoclips
 import os
 import shutil
 import uuid
 
 app = FastAPI()
 
-# Temporary files delete karne ka function (Memory bachane ke liye)
+# Temporary files safai abhiyian
 def cleanup_files(folder_path):
     if os.path.exists(folder_path):
         try:
@@ -18,15 +19,14 @@ def cleanup_files(folder_path):
 
 @app.get("/")
 def home():
-    return {"status": "✅ Video Worker is Running perfectly!"}
+    return {"status": "✅ Video Worker (MoviePy v2.2.1) is Live!"}
 
 @app.post("/merge-videos")
 async def merge_videos(
     background_tasks: BackgroundTasks,
     files: list[UploadFile] = File(...),
-    format: str = Form("vertical")  # Default 'vertical' (Shorts)
+    format: str = Form("vertical")
 ):
-    # Har request ke liye unique folder banayein
     session_id = str(uuid.uuid4())
     temp_dir = f"/tmp/{session_id}"
     os.makedirs(temp_dir, exist_ok=True)
@@ -35,41 +35,51 @@ async def merge_videos(
     clips = []
 
     try:
-        print(f"Processing {len(files)} videos for format: {format}")
+        print(f"Processing {len(files)} videos with MoviePy v2.2.1...")
 
-        # 1. Videos save karein
+        # 1. Videos Save Logic
         for i, file in enumerate(files):
             file_path = f"{temp_dir}/input_{i}.mp4"
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             saved_paths.append(file_path)
             
-            # Clip load karein
+            # Clip Load
             clip = VideoFileClip(file_path)
             
-            # 2. Resize Logic (Veo 3 videos ko adjust karna)
+            # 2. Resizing Logic (Updated for v2)
+            # Dhyan dein: Ab '.resize()' nahi '.resized()' use hota hai
+            
             if format == "vertical":
-                # Shorts (9:16) - Agar wide hai to crop karo, warna resize
+                # Shorts Logic (9:16)
                 if clip.w > clip.h:
                     target_ratio = 9/16
                     new_width = clip.h * target_ratio
-                    # Center Crop
-                    clip = clip.crop(x1=clip.w/2 - new_width/2, width=new_width, height=clip.h)
-                    clip = clip.resize(height=1920)
+                    
+                    # CHANGE 2: .crop() -> .cropped()
+                    clip = clip.cropped(
+                        x1=clip.w/2 - new_width/2, 
+                        width=new_width, 
+                        height=clip.h
+                    )
+                    
+                    # CHANGE 3: .resize() -> .resized()
+                    clip = clip.resized(height=1920)
                 else:
-                    clip = clip.resize(height=1920)
+                    clip = clip.resized(height=1920)
             
             elif format == "horizontal":
-                # Long Video (16:9)
-                clip = clip.resize(height=1080)
+                # Long Video Logic
+                clip = clip.resized(height=1080)
 
             clips.append(clip)
 
-        # 3. Merge Process
+        # 3. Merging Logic
         final_clip = concatenate_videoclips(clips, method="compose")
         output_path = f"{temp_dir}/final_output.mp4"
         
-        # Fast Rendering Settings (CPU bachaane ke liye)
+        # 4. Rendering
+        # 'preset' aur 'threads' fast rendering ke liye zaruri hain
         final_clip.write_videofile(
             output_path, 
             codec="libx264", 
@@ -79,18 +89,17 @@ async def merge_videos(
             threads=4
         )
 
-        # Clips close karein
+        # Cleanup Memory
         for clip in clips:
             clip.close()
+        final_clip.close()
 
-        # 4. Background Task: File bhejne ke baad delete kar dena
+        # Background Cleanup Task
         background_tasks.add_task(cleanup_files, temp_dir)
 
-        # 5. Video wapas bhejein
         return FileResponse(output_path, media_type="video/mp4", filename="merged_video.mp4")
 
     except Exception as e:
-        print(f"Error: {e}")
-        # Agar error aaye to bhi safai karo
+        # Error handling
         shutil.rmtree(temp_dir, ignore_errors=True)
-        return {"error": str(e)}
+        return {"error": str(e), "details": "MoviePy v2 update error"}
