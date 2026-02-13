@@ -1,7 +1,8 @@
 fastapi
 uvicorn
 python-multipart
-moviepy==2.2.1
+requests
+moviepy==2.1.1
 imageio==2.37.2
 decorators==2.0.7
-requests
+decorator==5.1.1
