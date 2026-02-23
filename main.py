@@ -37,6 +37,46 @@ async def merge_videos(
         print(f"Processing {len(files)} videos...")
         for i, file in enumerate(files):
             file_path = f"{temp_dir}/input_{i}.mp4"
+from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
+from fastapi.responses import FileResponse
+from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips
+import os
+import shutil
+import uuid
+
+app = FastAPI()
+
+def cleanup_files(folder_path):
+    """Temporary files ko delete karne ka function"""
+    if os.path.exists(folder_path):
+        try:
+            shutil.rmtree(folder_path)
+            print(f"Cleanup done: {folder_path}")
+        except Exception as e:
+            print(f"Error deleting folder: {e}")
+
+@app.get("/")
+def home():
+    return {"status": "✅ Video Worker (MoviePy v2.2.1) is Live and Ready for Shorts!"}
+
+# --- AAPKA PURANA FUNCTION (Safe and Untouched) ---
+@app.post("/merge-videos")
+async def merge_videos(
+    background_tasks: BackgroundTasks,
+    files: list[UploadFile] = File(...),
+    format: str = Form("vertical")
+):
+    session_id = str(uuid.uuid4())
+    temp_dir = f"/tmp/{session_id}"
+    os.makedirs(temp_dir, exist_ok=True)
+    
+    saved_paths = []
+    clips = []
+
+    try:
+        print(f"Processing {len(files)} videos...")
+        for i, file in enumerate(files):
+            file_path = f"{temp_dir}/input_{i}.mp4"
             with open(file_path, "wb") as buffer:
                 shutil.copyfileobj(file.file, buffer)
             
@@ -56,9 +96,17 @@ async def merge_videos(
         final_clip = concatenate_videoclips(clips, method="compose")
         output_path = f"{temp_dir}/final_output.mp4"
         
-        final_clip.write_videofile(output_path, codec="libx264", audio_codec="aac", fps=24, preset="ultrafast", threads=4)
+        final_clip.write_videofile(
+            output_path, 
+            codec="libx264", 
+            audio_codec="aac", 
+            fps=24, 
+            preset="ultrafast", 
+            threads=4
+        )
 
-        for clip in clips: clip.close()
+        for clip in clips: 
+            clip.close()
         final_clip.close()
 
         background_tasks.add_task(cleanup_files, temp_dir)
@@ -119,7 +167,7 @@ async def add_audio_to_video(
         # 3. Video ko exact Audio ki lambai par cut karna
         final_video = final_video.with_duration(audio_clip.duration)
         
-        # 4. Hamari 4-Character wali audio aur background music video mein fit karna
+        # 4. Hamari audio aur music ko video mein fit karna
         final_video = final_video.with_audio(audio_clip)
 
         # 5. Fast Render
