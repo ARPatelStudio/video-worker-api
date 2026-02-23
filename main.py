@@ -1,32 +1,5 @@
 from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse
-# CHANGE 1: 'moviepy.editor' ab exist nahi karta, direct import karein
-from moviepy import VideoFileClip, concatenate_videoclips
-import os
-import shutil
-import uuid
-
-app = FastAPI()
-
-# Temporary files safai abhiyian
-def cleanup_files(folder_path):
-    if os.path.exists(folder_path):
-        try:
-            shutil.rmtree(folder_path)
-            print(f"Cleanup done: {folder_path}")
-        except Exception as e:
-            print(f"Error deleting folder: {e}")
-
-@app.get("/")
-def home():
-    return {"status": "✅ Video Worker (MoviePy v2.2.1) is Live!"}
-
-@app.post("/merge-videos")
-async def merge_videos(
-    background_tasks: BackgroundTasks,
-    fi…
-[5:28 PM, 2/23/2026] Amit Patel: from fastapi import FastAPI, UploadFile, File, Form, BackgroundTasks
-from fastapi.responses import FileResponse
 from moviepy import VideoFileClip, AudioFileClip, concatenate_videoclips
 import os
 import shutil
@@ -105,6 +78,72 @@ async def add_audio_to_video(
     session_id = str(uuid.uuid4())
     temp_dir = f"/tmp/shorts_{session_id}"
     os.makedirs(temp_dir, exist_ok=True)
+    
+    video_path = f"{temp_dir}/bg_video.mp4"
+    audio_path = f"{temp_dir}/story_audio.wav"
+    output_path = f"{temp_dir}/final_youtube_short.mp4"
+
+    try:
+        print("🎬 Starting Audio & Video Mix...")
+        
+        # Files save karna
+        with open(video_path, "wb") as buffer:
+            shutil.copyfileobj(video.file, buffer)
+        with open(audio_path, "wb") as buffer:
+            shutil.copyfileobj(audio.file, buffer)
+
+        # Clips load karna
+        video_clip = VideoFileClip(video_path)
+        audio_clip = AudioFileClip(audio_path)
+
+        # 1. Video ko YouTube Shorts (9:16) format mein fit karna
+        if video_clip.w > video_clip.h:
+            target_ratio = 9/16
+            new_width = video_clip.h * target_ratio
+            video_clip = video_clip.cropped(
+                x1=video_clip.w/2 - new_width/2, 
+                width=new_width, 
+                height=video_clip.h
+            )
+        video_clip = video_clip.resized(height=1920)
+
+        # 2. Magic Loop Logic: Agar audio lambi hai, toh background video ko utni baar repeat karna
+        clips_to_concat = []
+        current_dur = 0
+        while current_dur < audio_clip.duration:
+            clips_to_concat.append(video_clip)
+            current_dur += video_clip.duration
+            
+        final_video = concatenate_videoclips(clips_to_concat)
+        
+        # 3. Video ko exact Audio ki lambai par cut karna
+        final_video = final_video.with_duration(audio_clip.duration)
+        
+        # 4. Hamari 4-Character wali audio aur background music video mein fit karna
+        final_video = final_video.with_audio(audio_clip)
+
+        # 5. Fast Render
+        final_video.write_videofile(
+            output_path, 
+            codec="libx264", 
+            audio_codec="aac", 
+            fps=24, 
+            preset="ultrafast", 
+            threads=4
+        )
+
+        # Memory Cleanup
+        video_clip.close()
+        audio_clip.close()
+        final_video.close()
+
+        background_tasks.add_task(cleanup_files, temp_dir)
+
+        return FileResponse(output_path, media_type="video/mp4", filename="Viral_Short.mp4")
+
+    except Exception as e:
+        cleanup_files(temp_dir)
+        return {"error": str(e), "details": "Error merging audio and video for Short."}    os.makedirs(temp_dir, exist_ok=True)
     
     video_path = f"{temp_dir}/bg_video.mp4"
     audio_path = f"{temp_dir}/story_audio.wav"
