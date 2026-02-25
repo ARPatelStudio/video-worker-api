@@ -11,7 +11,7 @@ app = FastAPI()
 
 # ⚠️ YAHAN APNA HUGGING FACE TOKEN DAALEIN (Jo 'hf_' se shuru hota hai)
 # Dhyan rahe, token ko double quotes " " ke andar hi rakhna hai.
-HF_TOKEN = "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" 
+HF_TOKEN = "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" 
 
 # Background memory (Jobs save karne ke liye)
 jobs = {}
