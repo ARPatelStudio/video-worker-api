@@ -16,7 +16,7 @@ from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoCli
 app = FastAPI()
 
 # --- ENVIRONMENT VARIABLES ---
-HF_TOKEN = os.getenv("HF_TOKEN") 
+HF_TOKEN = os.getenv("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") 
 
 # Background memory
 jobs = {}
