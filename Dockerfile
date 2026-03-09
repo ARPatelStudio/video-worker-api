@@ -1,11 +1,11 @@
 # 2026 Modern Standard: Python 3.12 version
 FROM python:3.12-slim
 
-# 1. System updates, FFmpeg, ImageMagick (TextClip ke liye) aur Fonts install karein
+# 1. System updates, FFmpeg, ImageMagick aur Fonts install karein
+# Error fix: (sed command ke aage || true lagaya hai taaki file na milne par crash na ho)
 RUN apt-get update && \
     apt-get install -y ffmpeg libsm6 libxext6 imagemagick fonts-liberation && \
-    # ImageMagick ki default policy update karein taaki text render ho sake
-    sed -i 's/none/read,write/g' /etc/ImageMagick-6/policy.xml && \
+    (sed -i 's/none/read,write/g' /etc/ImageMagick-6/policy.xml || true) && \
     rm -rf /var/lib/apt/lists/*
 
 # 2. Work directory set karein
