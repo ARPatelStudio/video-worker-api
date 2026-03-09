@@ -2,9 +2,12 @@ fastapi
 uvicorn[standard]
 python-multipart
 requests
-moviepy==2.2.1
+moviepy==1.0.3
 imageio
+imageio-ffmpeg
 decorators
 decorator
 pydantic
 gradio-client
+Pillow
+numpy
