@@ -10,7 +10,14 @@ import base64
 from typing import List
 from gradio_client import Client
 
-# MoviePy for Video Generation
+# =====================================================================
+# 🛠️ 2026 BUG FIX: PIL.Image ANTIALIAS Patch for MoviePy 1.0.3
+# =====================================================================
+import PIL.Image
+if not hasattr(PIL.Image, 'ANTIALIAS'):
+    PIL.Image.ANTIALIAS = PIL.Image.Resampling.LANCZOS
+
+# Ab MoviePy import karenge toh wo crash nahi hoga
 from moviepy.editor import ImageClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips
 
 app = FastAPI()
@@ -22,25 +29,17 @@ HF_TOKEN = os.getenv("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")
 jobs = {}
 
 # =====================================================================
-# 🛠️ HELPER FUNCTION: BASE64 CLEANER (2026 FIX)
+# 🛠️ HELPER FUNCTION: BASE64 CLEANER
 # =====================================================================
 def clean_base64_string(b64_string: str) -> bytes:
-    """n8n se aane wale Base64 text ko saaf karta hai (header aur padding fix)"""
-    # Agar string mein comma hai (jaise 'data:audio/wav;base64,UklG...'), toh comma ke baad ka hissa lo
     if "," in b64_string:
         b64_string = b64_string.split(",", 1)[1]
-    
-    # Missing padding ('=') fix karo
     b64_string += "=" * ((4 - len(b64_string) % 4) % 4)
-    
-    # Clean text ko bytes mein decode karo
     return base64.b64decode(b64_string)
 
 # =====================================================================
 # 🛠️ NEW FEATURE (2026 AI-FIRST): MEMORY-TO-MEMORY BASE64 MERGING
 # =====================================================================
-
-# Pydantic schema JSON payload ko securely validate karne ke liye
 class Base64MergeRequest(BaseModel):
     audio_base64: str
     images_base64: List[str]
@@ -51,18 +50,15 @@ async def merge_video_base64(request: Base64MergeRequest, background_tasks: Back
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status": "processing", "video_path": ""}
     
-    # Render server par temporary working directory banayenge
     work_dir = f"/tmp/workspace_{job_id}"
     os.makedirs(work_dir, exist_ok=True)
     
     try:
-        # 1. Base64 Audio ko clean karke save karo
         audio_path = os.path.join(work_dir, "audio.wav")
         audio_bytes = clean_base64_string(request.audio_base64)
         with open(audio_path, "wb") as f:
             f.write(audio_bytes)
             
-        # 2. Base64 Images ko clean karke save karo
         saved_images = []
         for i, img_b64 in enumerate(request.images_base64):
             img_path = os.path.join(work_dir, f"scene_{i}.jpg")
@@ -71,7 +67,6 @@ async def merge_video_base64(request: Base64MergeRequest, background_tasks: Back
                 f.write(img_bytes)
             saved_images.append(img_path)
             
-        # 3. Background mein MoviePy merging engine start karo
         background_tasks.add_task(create_merged_video_task, job_id, saved_images, audio_path, request.subtitles)
         
         return {
@@ -88,7 +83,6 @@ async def merge_video_base64(request: Base64MergeRequest, background_tasks: Back
 # =====================================================================
 # 🛠️ FEATURE 1: OLD FILE UPLOAD MERGING (PRESERVED)
 # =====================================================================
-
 def create_merged_video_task(job_id: str, images_paths: list, audio_path: str, subtitles_list: list):
     try:
         print(f"🎬 [{job_id}] Video Merging start ho gayi hai...")
@@ -105,7 +99,6 @@ def create_merged_video_task(job_id: str, images_paths: list, audio_path: str, s
             img_clip = ImageClip(img_path).set_duration(duration_per_image)
             img_clip = img_clip.resize(height=target_resolution[1], width=target_resolution[0])
             
-            # Zoom In aur Zoom Out alternate effect
             if i % 2 == 0:
                 img_clip = img_clip.resize(lambda t: 1 + 0.05 * (t / duration_per_image))
             else:
@@ -179,7 +172,6 @@ async def merge_video(
 # =====================================================================
 # 🛠️ FEATURE 2: WAN AI VIP VIDEO GENERATOR (PRESERVED)
 # =====================================================================
-
 def generate_video_task(job_id: str, prompt: str):
     try:
         if not HF_TOKEN:
@@ -221,7 +213,6 @@ async def start_video(background_tasks: BackgroundTasks, prompt: str = Form(...)
 # =====================================================================
 # 🛠️ GENERAL ENDPOINTS
 # =====================================================================
-
 @app.get("/")
 def home():
     return {"status": "✅ VIP API is Live! (Base64 + In-Memory processing active)"}
