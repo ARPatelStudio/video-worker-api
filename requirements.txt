@@ -5,9 +5,7 @@ requests
 moviepy==1.0.3
 imageio
 imageio-ffmpeg
-decorators
 decorator
 pydantic
-gradio-client
-Pillow
+Pillow==9.5.0
 numpy
