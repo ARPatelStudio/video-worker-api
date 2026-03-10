@@ -22,6 +22,21 @@ HF_TOKEN = os.getenv("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")
 jobs = {}
 
 # =====================================================================
+# 🛠️ HELPER FUNCTION: BASE64 CLEANER (2026 FIX)
+# =====================================================================
+def clean_base64_string(b64_string: str) -> bytes:
+    """n8n se aane wale Base64 text ko saaf karta hai (header aur padding fix)"""
+    # Agar string mein comma hai (jaise 'data:audio/wav;base64,UklG...'), toh comma ke baad ka hissa lo
+    if "," in b64_string:
+        b64_string = b64_string.split(",", 1)[1]
+    
+    # Missing padding ('=') fix karo
+    b64_string += "=" * ((4 - len(b64_string) % 4) % 4)
+    
+    # Clean text ko bytes mein decode karo
+    return base64.b64decode(b64_string)
+
+# =====================================================================
 # 🛠️ NEW FEATURE (2026 AI-FIRST): MEMORY-TO-MEMORY BASE64 MERGING
 # =====================================================================
 
@@ -41,17 +56,19 @@ async def merge_video_base64(request: Base64MergeRequest, background_tasks: Back
     os.makedirs(work_dir, exist_ok=True)
     
     try:
-        # 1. Base64 Audio ko wapas file mein convert karo
+        # 1. Base64 Audio ko clean karke save karo
         audio_path = os.path.join(work_dir, "audio.wav")
+        audio_bytes = clean_base64_string(request.audio_base64)
         with open(audio_path, "wb") as f:
-            f.write(base64.b64decode(request.audio_base64))
+            f.write(audio_bytes)
             
-        # 2. Base64 Images ko wapas file mein convert karo
+        # 2. Base64 Images ko clean karke save karo
         saved_images = []
         for i, img_b64 in enumerate(request.images_base64):
             img_path = os.path.join(work_dir, f"scene_{i}.jpg")
+            img_bytes = clean_base64_string(img_b64)
             with open(img_path, "wb") as f:
-                f.write(base64.b64decode(img_b64))
+                f.write(img_bytes)
             saved_images.append(img_path)
             
         # 3. Background mein MoviePy merging engine start karo
