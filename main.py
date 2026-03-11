@@ -3,13 +3,13 @@ import uuid
 import base64
 import subprocess
 import threading
+import traceback
 
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
-
 from PIL import Image, ImageDraw, ImageFont
 
 # =========================
@@ -19,7 +19,6 @@ if not hasattr(Image, "ANTIALIAS"):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
 
 app = FastAPI()
-
 jobs = {}
 
 # =========================
@@ -30,36 +29,39 @@ class VideoRequest(BaseModel):
     audio: str
     text: str
 
-# =========================
-# Home
-# =========================
 @app.get("/")
 def home():
     return {"status": "AI Video Worker Running"}
 
 # =========================
-# Base64 Cleaner
+# SUPER Base64 Cleaner (Bug Fix 🚀)
 # =========================
-def clean_base64(data):
+def clean_base64(data: str) -> bytes:
     if "," in data:
-        data = data.split(",")[1]
+        data = data.split(",", 1)[1]
+    
+    # ⚠️ NAYA FIX: Remove all hidden spaces and newlines from n8n
+    data = data.replace("\n", "").replace("\r", "").replace(" ", "")
     data += "=" * ((4 - len(data) % 4) % 4)
+    
     return base64.b64decode(data)
 
 # =========================
-# Audio Fix
+# Audio Fix (With Error Guard)
 # =========================
 def fix_audio(input_path):
-    output = input_path + "_fixed.mp3"
+    output = input_path + "_fixed.wav"
     cmd = [
-        "ffmpeg",
-        "-y",
-        "-i", input_path,
-        "-ac", "2",
-        "-ar", "44100",
-        output
+        "ffmpeg", "-y", "-i", input_path, 
+        "-ac", "2", "-ar", "44100", output
     ]
-    subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    
+    # Agar FFmpeg fail ho jaye, toh error print karo aur purani file use karo
+    if result.returncode != 0:
+        print(f"⚠️ FFmpeg Warning: {result.stderr.decode('utf-8', errors='ignore')}")
+        return input_path 
+        
     return output
 
 # =========================
@@ -68,7 +70,6 @@ def fix_audio(input_path):
 def create_text_overlay(text, width=720, height=1280):
     img = Image.new("RGBA", (width, height), (0,0,0,0))
     draw = ImageDraw.Draw(img)
-
     try:
         font = ImageFont.truetype("LiberationSans-Bold.ttf", 60)
     except:
@@ -82,7 +83,7 @@ def create_text_overlay(text, width=720, height=1280):
     y = height - text_h - 150
 
     draw.text((x,y), text, font=font, fill=(255,255,0,255))
-
+    
     path = "/tmp/subtitle.png"
     img.save(path)
     return path
@@ -97,7 +98,7 @@ def process_video(job_id, data):
         os.makedirs(workspace, exist_ok=True)
 
         image_paths = []
-        
+
         # Save Images
         for i, img_b64 in enumerate(data["images"]):
             img_path = f"{workspace}/img{i}.png"
@@ -106,10 +107,11 @@ def process_video(job_id, data):
             image_paths.append(img_path)
 
         # Save Audio
-        audio_path = f"{workspace}/audio_input"
+        audio_path = f"{workspace}/audio_input.wav"
         with open(audio_path, "wb") as f:
             f.write(clean_base64(data["audio"]))
 
+        # Audio Fix
         audio_path = fix_audio(audio_path)
         audio_clip = AudioFileClip(audio_path)
         duration = audio_clip.duration
@@ -159,6 +161,7 @@ def process_video(job_id, data):
 
     except Exception as e:
         print(f"❌ Error {job_id}: {e}")
+        traceback.print_exc()
         jobs[job_id] = {
             "status":"failed",
             "error":str(e)
@@ -182,6 +185,11 @@ def merge_video(req: VideoRequest):
         "check_url": f"/check-video/{job_id}",
         "download_url": f"/download-video/{job_id}"
     }
+
+# Backup For Old Workflow (Taki error na aaye)
+@app.post("/merge-video-base64")
+def merge_video_backup(req: VideoRequest):
+    return merge_video(req)
 
 # =========================
 # Check Status
