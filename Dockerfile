@@ -1,7 +1,7 @@
 # ==============================
-# Base Image (Python 3.12)
+# Base Image (Python 3.11 - Most Stable for AI)
 # ==============================
-FROM python:3.12-slim
+FROM python:3.11-slim
 
 # ==============================
 # System Dependencies Install
@@ -12,6 +12,7 @@ RUN apt-get update && \
     libsm6 \
     libxext6 \
     fonts-liberation \
+    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # ==============================
