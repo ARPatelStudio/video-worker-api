@@ -15,6 +15,7 @@ from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, Com
 import moviepy.video.fx.all as vfx
 
 from PIL import Image, ImageDraw, ImageFont
+from faster_whisper import WhisperModel
 
 # =========================
 # Pillow compatibility fix (Pillow 10+)
@@ -25,9 +26,17 @@ if not hasattr(Image, "ANTIALIAS"):
 app = FastAPI()
 jobs = {}
 
+# =========================
+# Initialize AI Whisper Model (Optimized for Render Free Tier)
+# =========================
+print("⏳ Loading AI Whisper Model...")
+# 'tiny' model aur 'int8' se CPU par RAM kam use hoti hai
+whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+print("✅ AI Whisper Model Loaded!")
+
 @app.get("/")
 def home():
-    return {"status": "✅ AI Video Worker Running with Pro Effects"}
+    return {"status": "✅ AI Video Worker Running with Word-by-Word Pro Captions"}
 
 # =========================
 # Audio Fix (FFmpeg)
@@ -42,58 +51,48 @@ def fix_audio(input_path):
     return output
 
 # =========================
-# 2026 MODERN CAPTIONS (Hormozi Style)
+# 2026 MODERN WORD-BY-WORD CAPTIONS
 # =========================
-def create_text_overlay(text, width=720, height=1280):
+def create_word_overlay(word, width=720, height=1280):
     img = Image.new("RGBA", (width, height), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     
-    # 1. Font setup (Agar LiberationSans na mile toh default load hoga)
+    # 1. Font setup (Bada font word-by-word ke liye)
     try:
-        font = ImageFont.truetype("LiberationSans-Bold.ttf", 55)
+        font = ImageFont.truetype("LiberationSans-Bold.ttf", 85)
     except:
         font = ImageFont.load_default()
 
-    # 2. Text Wrapping (Bahar jaane se rokne ke liye)
-    wrapper = textwrap.TextWrapper(width=22) # Ek line mein max 22 letters
-    lines = wrapper.wrap(text=text)
-
-    # 3. Calculate total height so we can center the block vertically at the bottom
-    line_heights = []
-    for line in lines:
-        bbox = draw.textbbox((0,0), line, font=font)
-        line_heights.append(bbox[3] - bbox[1])
+    # Clean the word and make it uppercase for impact
+    word = word.strip().upper()
     
-    total_text_height = sum(line_heights) + (15 * len(lines))
-    y_start = height - total_text_height - 250 
+    # Calculate exact text size
+    bbox = draw.textbbox((0,0), word, font=font)
+    text_w = bbox[2] - bbox[0]
+    text_h = bbox[3] - bbox[1]
     
-    # 4. Draw each line
-    for i, line in enumerate(lines):
-        bbox = draw.textbbox((0,0), line, font=font)
-        text_w = bbox[2] - bbox[0]
-        text_h = bbox[3] - bbox[1]
-        x_start = (width - text_w) // 2
+    # Position: Center horizontally, Bottom vertically (70% down)
+    x_start = (width - text_w) // 2
+    y_start = int(height * 0.70) 
+    
+    # Black Semi-Transparent Background Box
+    box_padding = 20
+    draw.rectangle(
+        [x_start - box_padding, y_start - box_padding, x_start + text_w + box_padding, y_start + text_h + box_padding],
+        fill=(0, 0, 0, 200)
+    )
+    
+    # Glowing Yellow Text with Thick Black Stroke
+    draw.text(
+        (x_start, y_start), 
+        word, 
+        font=font, 
+        fill=(255, 230, 0, 255), 
+        stroke_width=5, 
+        stroke_fill=(0, 0, 0, 255)
+    )
         
-        # Black Semi-Transparent Background Box
-        box_padding = 15
-        draw.rectangle(
-            [x_start - box_padding, y_start - box_padding, x_start + text_w + box_padding, y_start + text_h + box_padding],
-            fill=(0, 0, 0, 180)
-        )
-        
-        # Glowing Yellow Text with Black Stroke
-        draw.text(
-            (x_start, y_start), 
-            line, 
-            font=font, 
-            fill=(255, 230, 0, 255), 
-            stroke_width=3, 
-            stroke_fill=(0, 0, 0, 255)
-        )
-        
-        y_start += text_h + 15 
-        
-    path = f"/tmp/subtitle_{uuid.uuid4().hex}.png"
+    path = f"/tmp/word_{uuid.uuid4().hex}.png"
     img.save(path)
     return path
 
@@ -111,45 +110,60 @@ def process_video(job_id, image_paths, audio_path, text):
         per_image = duration / max(1, len(image_paths))
         clips = []
 
+        # 1. Process Background Images
         for i, img in enumerate(image_paths):
             clip = ImageClip(img).set_duration(per_image)
             
-            # 1. Base Resolution Setup
+            # Base Resolution Setup
             clip = clip.resize(height=1400) 
             clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
 
-            # 2. Smooth Alternate Zoom In & Out
+            # Smooth Alternate Zoom In & Out
             if i % 2 == 0:
-                clip = clip.resize(lambda t: 1 + 0.04 * (t / per_image)) # Zoom In
+                clip = clip.resize(lambda t: 1 + 0.04 * (t / per_image)) 
             else:
-                clip = clip.resize(lambda t: 1.04 - 0.04 * (t / per_image)) # Zoom Out
+                clip = clip.resize(lambda t: 1.04 - 0.04 * (t / per_image)) 
             
-            # Re-crop to strict Shorts dimension
             clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
-
-            # 3. Basic Color Grading (Contrast Boost)
             clip = clip.fx(vfx.colorx, 1.05) 
-
-            # 4. Fade In / Fade Out Transitions
             clip = clip.fadein(0.3).fadeout(0.3)
 
             clips.append(clip)
 
-        # Merge all clips
+        # Merge background clips and attach audio
         video = concatenate_videoclips(clips, method="compose")
         video = video.set_audio(audio_clip)
 
-        # 5. Apply Subtitles
-        if text and text.strip() != "":
-            subtitle_img = create_text_overlay(text)
-            txt_clip = ImageClip(subtitle_img).set_duration(video.duration).set_position(("center","top"))
-            final = CompositeVideoClip([video, txt_clip])
+        # 2. Generate Word-by-Word Subtitles using AI
+        print(f"🧠 [{job_id}] Transcribing Audio for Word Timestamps...")
+        segments, _ = whisper_model.transcribe(audio_path, word_timestamps=True)
+        
+        subtitle_clips = []
+        for segment in segments:
+            for word_info in segment.words:
+                # Create image for single word
+                word_img_path = create_word_overlay(word_info.word)
+                
+                # Clip appears exactly when word is spoken and disappears after
+                txt_clip = (ImageClip(word_img_path)
+                            .set_start(word_info.start)
+                            .set_end(word_info.end)
+                            .set_position(("center", "center")))
+                
+                subtitle_clips.append(txt_clip)
+
+        # 3. Composite Everything
+        if subtitle_clips:
+            print(f"✍️ [{job_id}] Applying {len(subtitle_clips)} Word Captions...")
+            # Puts background video first, then overlays all individual word clips on top
+            final = CompositeVideoClip([video] + subtitle_clips)
         else:
             final = video
 
         output = f"{workspace}/output.mp4"
 
-        # Fast Export with libx264
+        # 4. Fast Export
+        print(f"🚀 [{job_id}] Rendering Final MP4...")
         final.write_videofile(
             output, 
             fps=24, 
@@ -160,7 +174,7 @@ def process_video(job_id, image_paths, audio_path, text):
         )
 
         jobs[job_id] = {"status":"completed", "file":output}
-        print(f"✅ [{job_id}] Video ready with Pro Effects")
+        print(f"✅ [{job_id}] Video ready with Word-by-Word Effects!")
 
     except Exception as e:
         print(f"❌ Error {job_id}: {e}")
@@ -174,19 +188,19 @@ def process_video(job_id, image_paths, audio_path, text):
 def merge_video_file(
     audio: UploadFile = File(...),
     images: List[UploadFile] = File(...),
-    text: str = Form(...)
+    text: str = Form(...) # We still accept text to avoid breaking the n8n API call
 ):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status":"processing"}
     workspace = f"/tmp/work_{job_id}"
     os.makedirs(workspace, exist_ok=True)
 
-    # Save Audio securely
+    # Save Audio
     audio_path = os.path.join(workspace, audio.filename)
     with open(audio_path, "wb") as f:
         shutil.copyfileobj(audio.file, f)
 
-    # Save Images securely
+    # Save Images
     saved_images = []
     for i, img in enumerate(images):
         img_path = os.path.join(workspace, f"img_{i}.png")
@@ -194,7 +208,7 @@ def merge_video_file(
             shutil.copyfileobj(img.file, f)
         saved_images.append(img_path)
 
-    # Run heavy processing in Background
+    # Process in Background
     threading.Thread(target=process_video, args=(job_id, saved_images, audio_path, text)).start()
 
     return {
@@ -203,18 +217,12 @@ def merge_video_file(
         "download_url": f"/download-video/{job_id}"
     }
 
-# =========================
-# Check Status API
-# =========================
 @app.get("/check-video/{job_id}")
 def check(job_id:str):
     if job_id not in jobs:
         return {"status":"not_found"}
     return {"status": jobs[job_id]["status"]}
 
-# =========================
-# Download Output API
-# =========================
 @app.get("/download-video/{job_id}")
 def download(job_id:str):
     if job_id not in jobs:
