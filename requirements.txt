@@ -9,3 +9,4 @@ decorator
 pydantic
 Pillow==10.3.0
 numpy
+faster-whisper==1.0.0
