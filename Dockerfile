@@ -1,5 +1,5 @@
 # ==============================
-# Base Image (Python 3.11 - Most Stable for AI)
+# Base Image (Python 3.11 - Stable & Fast)
 # ==============================
 FROM python:3.11-slim
 
@@ -11,8 +11,6 @@ RUN apt-get update && \
     ffmpeg \
     libsm6 \
     libxext6 \
-    fonts-liberation \
-    pkg-config \
     && rm -rf /var/lib/apt/lists/*
 
 # ==============================
