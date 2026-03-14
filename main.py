@@ -10,15 +10,15 @@ from typing import List
 from fastapi import FastAPI, Form, File, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
+import requests
 
 from moviepy.editor import ImageClip, AudioFileClip, concatenate_videoclips, CompositeVideoClip
 import moviepy.video.fx.all as vfx
 
 from PIL import Image, ImageDraw, ImageFont
-from faster_whisper import WhisperModel
 
 # =========================
-# Pillow compatibility fix (Pillow 10+)
+# Pillow compatibility fix
 # =========================
 if not hasattr(Image, "ANTIALIAS"):
     Image.ANTIALIAS = Image.Resampling.LANCZOS
@@ -26,17 +26,9 @@ if not hasattr(Image, "ANTIALIAS"):
 app = FastAPI()
 jobs = {}
 
-# =========================
-# Initialize AI Whisper Model (Optimized for Render Free Tier)
-# =========================
-print("⏳ Loading AI Whisper Model...")
-# 'tiny' model aur 'int8' se CPU par RAM kam use hoti hai
-whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
-print("✅ AI Whisper Model Loaded!")
-
 @app.get("/")
 def home():
-    return {"status": "✅ AI Video Worker Running with Word-by-Word Pro Captions"}
+    return {"status": "✅ AI Video Worker Running with Cloud Whisper (Groq)!"}
 
 # =========================
 # Audio Fix (FFmpeg)
@@ -51,45 +43,63 @@ def fix_audio(input_path):
     return output
 
 # =========================
+# Groq API Whisper (Zero RAM usage on Render)
+# =========================
+def get_word_timestamps_from_groq(audio_path):
+    api_key = os.environ.get("GROQ_API_KEY")
+    if not api_key:
+        raise Exception("❌ GROQ_API_KEY is missing in Render Environment Variables!")
+        
+    url = "https://api.groq.com/openai/v1/audio/transcriptions"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    
+    with open(audio_path, "rb") as f:
+        files = {
+            "file": (os.path.basename(audio_path), f, "audio/wav")
+        }
+        data = {
+            "model": "whisper-large-v3",
+            "response_format": "verbose_json",
+            "timestamp_granularities[]": "word"
+        }
+        print("☁️ Sending audio to Groq Cloud for transcription...")
+        response = requests.post(url, headers=headers, files=files, data=data)
+        
+    if response.status_code != 200:
+        raise Exception(f"Groq API Error: {response.text}")
+        
+    result = response.json()
+    return result.get("words", [])
+
+# =========================
 # 2026 MODERN WORD-BY-WORD CAPTIONS
 # =========================
 def create_word_overlay(word, width=720, height=1280):
     img = Image.new("RGBA", (width, height), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     
-    # 1. Font setup (Bada font word-by-word ke liye)
     try:
         font = ImageFont.truetype("LiberationSans-Bold.ttf", 85)
     except:
         font = ImageFont.load_default()
 
-    # Clean the word and make it uppercase for impact
     word = word.strip().upper()
-    
-    # Calculate exact text size
     bbox = draw.textbbox((0,0), word, font=font)
     text_w = bbox[2] - bbox[0]
     text_h = bbox[3] - bbox[1]
     
-    # Position: Center horizontally, Bottom vertically (70% down)
     x_start = (width - text_w) // 2
     y_start = int(height * 0.70) 
     
-    # Black Semi-Transparent Background Box
     box_padding = 20
     draw.rectangle(
         [x_start - box_padding, y_start - box_padding, x_start + text_w + box_padding, y_start + text_h + box_padding],
         fill=(0, 0, 0, 200)
     )
     
-    # Glowing Yellow Text with Thick Black Stroke
     draw.text(
-        (x_start, y_start), 
-        word, 
-        font=font, 
-        fill=(255, 230, 0, 255), 
-        stroke_width=5, 
-        stroke_fill=(0, 0, 0, 255)
+        (x_start, y_start), word, font=font, fill=(255, 230, 0, 255), 
+        stroke_width=5, stroke_fill=(0, 0, 0, 255)
     )
         
     path = f"/tmp/word_{uuid.uuid4().hex}.png"
@@ -110,15 +120,11 @@ def process_video(job_id, image_paths, audio_path, text):
         per_image = duration / max(1, len(image_paths))
         clips = []
 
-        # 1. Process Background Images
         for i, img in enumerate(image_paths):
             clip = ImageClip(img).set_duration(per_image)
-            
-            # Base Resolution Setup
             clip = clip.resize(height=1400) 
             clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
 
-            # Smooth Alternate Zoom In & Out
             if i % 2 == 0:
                 clip = clip.resize(lambda t: 1 + 0.04 * (t / per_image)) 
             else:
@@ -127,50 +133,39 @@ def process_video(job_id, image_paths, audio_path, text):
             clip = clip.crop(x_center=clip.w/2, y_center=clip.h/2, width=720, height=1280)
             clip = clip.fx(vfx.colorx, 1.05) 
             clip = clip.fadein(0.3).fadeout(0.3)
-
             clips.append(clip)
 
-        # Merge background clips and attach audio
         video = concatenate_videoclips(clips, method="compose")
         video = video.set_audio(audio_clip)
 
-        # 2. Generate Word-by-Word Subtitles using AI
-        print(f"🧠 [{job_id}] Transcribing Audio for Word Timestamps...")
-        segments, _ = whisper_model.transcribe(audio_path, word_timestamps=True)
+        # Get Words from Groq API
+        words_data = get_word_timestamps_from_groq(audio_path)
         
         subtitle_clips = []
-        for segment in segments:
-            for word_info in segment.words:
-                # Create image for single word
-                word_img_path = create_word_overlay(word_info.word)
-                
-                # Clip appears exactly when word is spoken and disappears after
-                txt_clip = (ImageClip(word_img_path)
-                            .set_start(word_info.start)
-                            .set_end(word_info.end)
-                            .set_position(("center", "center")))
-                
-                subtitle_clips.append(txt_clip)
+        for word_info in words_data:
+            word_text = word_info['word']
+            start_time = word_info['start']
+            end_time = word_info['end']
+            
+            word_img_path = create_word_overlay(word_text)
+            txt_clip = (ImageClip(word_img_path)
+                        .set_start(start_time)
+                        .set_end(end_time)
+                        .set_position(("center", "center")))
+            subtitle_clips.append(txt_clip)
 
-        # 3. Composite Everything
         if subtitle_clips:
-            print(f"✍️ [{job_id}] Applying {len(subtitle_clips)} Word Captions...")
-            # Puts background video first, then overlays all individual word clips on top
+            print(f"✍️ [{job_id}] Applying {len(subtitle_clips)} Word Captions from Groq...")
             final = CompositeVideoClip([video] + subtitle_clips)
         else:
             final = video
 
         output = f"{workspace}/output.mp4"
 
-        # 4. Fast Export
         print(f"🚀 [{job_id}] Rendering Final MP4...")
         final.write_videofile(
-            output, 
-            fps=24, 
-            codec="libx264", 
-            audio_codec="aac", 
-            preset="ultrafast", 
-            threads=1
+            output, fps=24, codec="libx264", audio_codec="aac", 
+            preset="ultrafast", threads=1
         )
 
         jobs[job_id] = {"status":"completed", "file":output}
@@ -181,26 +176,21 @@ def process_video(job_id, image_paths, audio_path, text):
         traceback.print_exc()
         jobs[job_id] = {"status":"failed", "error":str(e)}
 
-# =========================
-# MULTIPART FILE UPLOAD API
-# =========================
 @app.post("/merge-video")
 def merge_video_file(
     audio: UploadFile = File(...),
     images: List[UploadFile] = File(...),
-    text: str = Form(...) # We still accept text to avoid breaking the n8n API call
+    text: str = Form(...) 
 ):
     job_id = str(uuid.uuid4())
     jobs[job_id] = {"status":"processing"}
     workspace = f"/tmp/work_{job_id}"
     os.makedirs(workspace, exist_ok=True)
 
-    # Save Audio
     audio_path = os.path.join(workspace, audio.filename)
     with open(audio_path, "wb") as f:
         shutil.copyfileobj(audio.file, f)
 
-    # Save Images
     saved_images = []
     for i, img in enumerate(images):
         img_path = os.path.join(workspace, f"img_{i}.png")
@@ -208,14 +198,9 @@ def merge_video_file(
             shutil.copyfileobj(img.file, f)
         saved_images.append(img_path)
 
-    # Process in Background
     threading.Thread(target=process_video, args=(job_id, saved_images, audio_path, text)).start()
 
-    return {
-        "job_id": job_id, 
-        "check_url": f"/check-video/{job_id}", 
-        "download_url": f"/download-video/{job_id}"
-    }
+    return {"job_id": job_id, "check_url": f"/check-video/{job_id}", "download_url": f"/download-video/{job_id}"}
 
 @app.get("/check-video/{job_id}")
 def check(job_id:str):
