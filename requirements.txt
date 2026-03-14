@@ -1,11 +1,8 @@
 fastapi
 uvicorn[standard]
 python-multipart
-requests
 moviepy==1.0.3
 imageio
 imageio-ffmpeg
-decorator
 pydantic
 Pillow==10.3.0
-numpy
